@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<modification>
+    <id>BFF - Fixes</id>
+    <version>1.0</version>
+    <vqmver required="true">2.6.0</vqmver>
+    <author>IPTVdevs</author>
+
+     <file error="skip" path="catalog/model/account/customer.php">
+        <operation error="skip" >
+            <search position="before"><![CDATA[public function deleteLoginAttempts($email)]]></search>
+            <add><![CDATA[
+                public function editCustomerVaultId($customer_id,$customer_vault_id,$customer_card_number,$customer_card_expiry) {
+                        $this->db->query("UPDATE " . DB_PREFIX . "customer SET customer_vault_id = '" . $customer_vault_id . "',customer_card_number = '" . $customer_card_number . "',customer_card_expiry= '".$customer_card_expiry."' WHERE customer_id = '" . (int)$customer_id . "'");
+                }
+                
+                public function editCustomerVaultIdOnly($customer_id,$customer_vault_id) {
+                        $this->db->query("UPDATE " . DB_PREFIX . "customer SET customer_vault_id = '" . $customer_vault_id . "' WHERE customer_id = '" . (int)$customer_id . "'");
+                }
+
+                public function updateTransactionId($order_id,$transaction_id) {
+                        $this->db->query("UPDATE `" . DB_PREFIX . "order` SET transaction_id = '" . $transaction_id . "' WHERE order_id = '" . (int)$order_id . "'");
+                }
+            ]]></add>
+        </operation>
+    </file>
+    <file error="skip" path="admin/controller/sale/order.php">
+        <operation error="skip">
+            <search position="before"><![CDATA[if ($order_info['customer_id'])]]></search>
+            <add><![CDATA[
+                $data['payment_code'] = $order_info['payment_code'];
+            ]]></add>
+        </operation>
+    </file>
+
+    <file error="skip" path="catalog/model/checkout/order.php">
+        <operation error="skip">
+            <search position="after"><![CDATA[$order_query->row['date_added'],]]></search>
+            <add><![CDATA[
+                'transaction_id' => $order_query->row['transaction_id'],
+            ]]></add>
+        </operation>
+    </file>
+
+      <file error="skip" path="admin/view/template/sale/order_info.tpl">
+        <operation error="skip" >
+            <search position="before" offset="1"><![CDATA[<label class="col-sm-2 control-label" for="input-override"><span data-toggle="tooltip" title="<?php echo $help_override; ?>"><?php echo $entry_override; ?></span></label>]]></search>
+            <add><![CDATA[
+                <div id="check_nmi_refunded" style="display: none;">
+                    <input type="hidden" value="0" name="is_nmi_refund" id="is_nmi_refund">
+                    <div class="form-group">
+                      <label class="col-sm-2 control-label" for="input-order-status"><?php echo "Refund Type"; ?></label>
+                      <div class="col-sm-10">
+                        <select name="order_refund_type" id="input-order-refund-type" class="form-control">
+                          <option value="1">Do Not Refund On NMI</option>
+                          <option value="2">Refund In NMI partial</option>
+                          <option value="3">Refund In NMI full</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div class="form-group" id="nmi_amount" style="display: none;">
+                      <label class="col-sm-2 control-label" for="input-order-amount"><?php echo "Refund Amount"; ?></label>
+                      <div class="col-sm-2">
+                        <input type="text" name="order_refund_amount" value="" class="form-control" id="input-order-refund-amount" />
+                      </div>
+                    </div>
+                </div>
+            ]]></add>
+        </operation>
+        <operation error="skip" >
+            <search position="before"><![CDATA[$('#openbay-info').remove();]]></search>
+            <add><![CDATA[
+                //nmi refunded code
+                var paymentcode = '<?php echo $payment_code; ?>';
+                if(status_id == 11 && paymentcode == 'bff') {
+                    $('#check_nmi_refunded').show();
+                    $('#is_nmi_refund').val('1');
+
+                } else {
+                    $('#check_nmi_refunded').hide();
+                    $('#is_nmi_refund').val('0');
+                }
+            ]]></add>
+        </operation>
+
+        <operation error="skip" >
+            <search position="before"><![CDATA[$('select[name="order_status_id"]').change(function(){]]></search>
+            <add><![CDATA[
+                $('select[name="order_refund_type"]').change(function(){
+                        var refund_type_id = $(this).val();
+                        if(refund_type_id == 2) {
+                            $('#nmi_amount').show();
+                        } else {
+                            $('#nmi_amount').hide();
+                        }
+                });
+            ]]></add>
+        </operation>
+
+         <operation error="skip" >
+            <search position="replace"><![CDATA['&comment=']]></search>
+            <add><![CDATA['&is_nmi_refund=' + encodeURIComponent($('#is_nmi_refund').val()) + '&order_refund_type=' + encodeURIComponent($('#input-order-refund-type').val()) + '&order_refund_amount=' + encodeURIComponent($('#input-order-refund-amount').val()) + '&comment=']]></add>
+        </operation>
+    </file>
+
+    <file error="skip" path="catalog/controller/api/order.php">
+        <operation error="skip">
+            <search position="before"><![CDATA[$this->model_checkout_order->addOrderHistory($order_id, $this->request->post['order_status_id'], $this->request->post['comment'], $this->request->post['notify'], $this->request->post['override']);]]></search>
+            <add><![CDATA[
+                        $check_nmi = 1;
+                        if($this->request->post['order_status_id'] == 11 && $this->request->post['is_nmi_refund'] == 1 && $this->request->post['order_refund_type'] != 1 ) {
+                            $order_info['refund_type'] = $this->request->post['order_refund_type'];
+                            $order_info['refund_amount'] = $this->request->post['order_refund_amount'];
+                            $nmi_response =  $this->load->controller('extension/payment/bff/refund',$order_info);
+                            if(isset($nmi_response['error'])) {
+                                $json['error'] = $nmi_response['error'];
+                                $check_nmi = 0;
+                            }
+                        }
+                        if($check_nmi == 1) {
+            ]]></add>
+        </operation>
+        <operation error="skip">
+            <search position="after" index="5"><![CDATA[$json['success'] = $this->language->get('text_success');]]></search>
+            <add><![CDATA[
+                       }
+            ]]></add>
+        </operation>
+    </file>
+	
+	<file error="skip" path="catalog/controller/extension/payment/bff.php">
+		<operation error="skip">
+            <search position="replace" index="2"><![CDATA[$json = array();]]></search>
+            <add><![CDATA[]]></add>
+        </operation>
+        <operation error="skip">
+            <search position="after"><![CDATA[$this->load->model('checkout/order');]]></search>
+            <add><![CDATA[
+			$json = array();
+			if (!isset($this->session->data['order_id'])) {
+				$json['error'] = 'No order found!';
+				$this->response->addHeader('Content-Type: application/json');
+				$this->response->setOutput(json_encode($json));
+				return;
+			}
+			]]></add>
+        </operation>
+		<operation error="skip">
+            <search position="replace"><![CDATA['ccnumber' 				=> str_replace('-', '', $this->request->post['card_num']),]]></search>
+            <add><![CDATA['ccnumber' 				=> isset($this->request->post['card_num']) ? str_replace('-', '', $this->request->post['card_num']) : '',]]></add>
+        </operation>
+    </file>
+	
+</modification>
